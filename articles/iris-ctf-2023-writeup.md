@@ -397,9 +397,9 @@ document.addEventListener("DOMContentLoaded", (e) => {
     async function decrypto(enc_image, d) {
       const _d = new TextEncoder().encode(d),
         keyData = await crypto.subtle.digest("SHA-256", _d),
-        _0x607241 = atob(enc_image).slice(0x0, 0xc),
+        string_iv = atob(enc_image).slice(0x0, 0xc),
         iv = new Uint8Array(
-          Array.from(_0x607241).map((arg) => arg.charCodeAt(0x0))
+          Array.from(string_iv).map((arg) => arg.charCodeAt(0x0))
         ),
         algorithm = {
           name: "AES-GCM",
@@ -412,9 +412,9 @@ document.addEventListener("DOMContentLoaded", (e) => {
           false,
           ["decrypt"]
         ),
-        _0x2ea238 = atob(enc_image).slice(0xc),
+        string_data = atob(enc_image).slice(0xc),
         data = new Uint8Array(
-          Array.from(_0x2ea238).map((arg) => arg.charCodeAt(0x0))
+          Array.from(string_data).map((arg) => arg.charCodeAt(0x0))
         );
       try {
         const input = await crypto.subtle.decrypt(algorithm, key, data),
@@ -441,11 +441,11 @@ document.addEventListener("DOMContentLoaded", (e) => {
         return;
       }
       let [_b, _d] = calcFromCategoryName();
-      (b *= 0x11n),
-        (b += BigInt(_b)),
-        (b &= 0xffffffffffffffffn),
-        (d += _d),
-        h.push(b);
+      b *= 0x11n;
+      b += BigInt(_b);
+      b &= 0xffffffffffffffffn;
+      d += _d;
+      h.push(b);
       if (h["length"] == expected_h["length"])
         for (let idx = 0x0; idx < h["length"]; idx++) {
           if (h[idx] != expected_h[idx]) {
@@ -552,7 +552,7 @@ for b in expected_h:
 ## Host Issues (20 solves)
 ![](/images/iris-ctf-2023-writeup/2023-01-09-18-04-55.png)
 
-2つの python コードが配布されています。
+2つの Python コードが配布されています。
 
 1つ目は Flask 製のサーバです。
 ```python:chal_serv.py
