@@ -113,6 +113,8 @@ window.onload = () => {
 (いわゆるJSONPという仕組みです。)
 https://www.tohoho-web.com/ex/jsonp.html
 
+フラグを cookie に設定している bot があり、この bot に任意のURLへアクセスさせることができます。
+
 `home.html` の `setMessage` を引数の値を外部へ送信するように改造したものを公開します。(ngrok を使うと簡単に公開できます)
 そして、この公開URLに bot をアクセスさせます。ヒントに書いてあるように、cookie に `SameSite=None` が設定されています。この設定によりクロスサイトでも cookie が付与されるため、bot の cookie が `/api` のレスポンスに含まれ、外部へ送信することができます。
 
