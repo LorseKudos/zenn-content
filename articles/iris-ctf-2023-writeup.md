@@ -3,7 +3,7 @@ title: "IrisCTF 2023 - Writeup"
 emoji: "💉"
 type: "tech" # tech: 技術記事 / idea: アイデア
 topics: ["CTF"]
-published: false
+published: true
 ---
 
 1月7日から1月9日にかけて開催された IrisCTF 2023 にソロで参加し，730チーム中23位でした。
