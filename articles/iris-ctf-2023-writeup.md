@@ -467,7 +467,7 @@ document.addEventListener("DOMContentLoaded", (e) => {
     1. `_b = categoryName.charCodeAt(1) * categoryName.charCodeAt(6) - categoryName.charCodeAt(3)`
     1. `_d = categoryName[1] + categoryName[6] + categoryName[3]`
     1. `b = ((b * 17n) + _b) & 0xffffffffffffffffn`, `d += _d`, `h += b`
-1. `h` と `expected_h` が等しければ `enc_image` を復号して背景に設定
+    1. `h` と `expected_h` が等しければ `enc_image` を復号して背景に設定
 
 2番目の処理を全カテゴリ名についてシミュレーションし、`expected_h` の要素と等しくなるようなカテゴリ名を探すことで、カテゴリを選択する順番が分かります。
 
